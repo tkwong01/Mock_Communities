@@ -12,6 +12,11 @@ set -o pipefail
 # --- User Configuration ---
 CUSTOM_FASTA="/cluster/tufts/hussainlab/DATABASES/VIRGO2/FastaFiles/VIRGO2.fa"
 
+# Define index prefix right alongside the FASTA (or in a persistent shared folder if read-only)
+# Using a persistent index directory in your work dir to avoid permission errors on the database folder:
+INDEX_DIR="/cluster/tufts/hussainlab/tkwong01/mock_reads/shared_bowtie_index"
+INDEX_PREFIX="$INDEX_DIR/VIRGO2_idx"
+
 # --- Directories & Environment ---
 source activate /cluster/tufts/hussainlab/tkwong01/envs/wgsimenv
 WORK_DIR="/cluster/tufts/hussainlab/tkwong01/mock_reads"
@@ -19,6 +24,22 @@ COMM_DIR="$WORK_DIR/wgsim_communities"
 cd "$WORK_DIR"
 
 THREADS=8
+mkdir -p "$INDEX_DIR"
+
+# --- Step 1: Check Custom FASTA Existence ---
+if [ ! -f "$CUSTOM_FASTA" ]; then
+    echo "Error: Custom FASTA file not found at $CUSTOM_FASTA. Exiting."
+    exit 1
+fi
+
+# --- Step 2: Build Bowtie2 Index ONCE (if it doesn't already exist) ---
+if [ -f "${INDEX_PREFIX}.1.bt2" ] || [ -f "${INDEX_PREFIX}.1.bt2l" ]; then
+    echo "Found existing Bowtie2 index at $INDEX_PREFIX. Skipping index building."
+else
+    echo "Index not found. Building Bowtie2 index for custom reference (this happens only once)..."
+    bowtie2-build --threads "$THREADS" "$CUSTOM_FASTA" "$INDEX_PREFIX"
+    echo "Index building complete."
+fi
 
 # Loop through each community size setup (2 to 6 species)
 for NSPS in 2; do
@@ -27,20 +48,8 @@ for NSPS in 2; do
     echo "=================================================="
 
     COMM_PREFIX="community_${NSPS}sp"
-    CUSTOM_DIR="$WORK_DIR/${NSPS}sp_custom_ref"
     CUSTOM_MAP_DIR="$WORK_DIR/${NSPS}sp_custom_mapping"
-    
-    mkdir -p "$CUSTOM_DIR" "$CUSTOM_MAP_DIR"
-
-    # --- Step 1: Check Custom FASTA Existence ---
-    if [ ! -f "$CUSTOM_FASTA" ]; then
-        echo "Error: Custom FASTA file not found at $CUSTOM_FASTA. Skipping."
-        continue
-    fi
-
-    # --- Step 2: Build Bowtie2 Index for Custom Reference FASTA ---
-    echo "Building Bowtie2 index for custom reference: $CUSTOM_FASTA..."
-    bowtie2-build --threads "$THREADS" "$CUSTOM_FASTA" "$CUSTOM_DIR/custom_ref_idx" > /dev/null 2>&1
+    mkdir -p "$CUSTOM_MAP_DIR"
 
     # --- Step 3: Map Time-Point FASTQs Across 30 Time Points ---
     CUSTOM_SUMMARY_MATRIX="$WORK_DIR/timeseries_counts_custom_${NSPS}sp.tsv"
@@ -58,7 +67,7 @@ for NSPS in 2; do
             n_refs=$(grep -c "^>" "$CUSTOM_FASTA")
             seq "$n_refs" | awk '{print "0"}' > "$COUNTS_FILE"
         else
-            bowtie2 -x "$CUSTOM_DIR/custom_ref_idx" -U "$FASTQ" -p "$THREADS" -S "$SAM" --very-fast > /dev/null 2>&1
+            bowtie2 -x "$INDEX_PREFIX" -U "$FASTQ" -p "$THREADS" -S "$SAM" --very-fast > /dev/null 2>&1
             samtools view -bS "$SAM" | samtools sort -o "$SORTED_BAM"
             samtools index "$SORTED_BAM"
             samtools idxstats "$SORTED_BAM" | awk '{print $3}' > "$COUNTS_FILE"
