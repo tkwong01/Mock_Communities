@@ -84,7 +84,20 @@ for NSPS in 2 3 4 5 6; do
                 n_unitigs=$(grep -c "^>" "$UNITIG_FASTA")
                 seq "$n_unitigs" | awk '{print "0"}' > "$COUNTS_FILE"
             else
-                bowtie2 -x "$UNITIG_DIR"//unitig_idx -U "$FASTQ" -p "$THREADS" -S "$SAM" --very-fast > /dev/null 2>&1
+                bowtie2 -x "$UNITIG_DIR/unitig_idx" \
+                        -U "$FASTQ" \
+                        -p "$THREADS" \
+                        -S "$SAM" \
+                        -N 0 \
+                        -L 20 \
+                        -D 20 \
+                        -R 3 \
+                        -k 10 \
+                        --sam-no-qname-trunc \
+                        --end-to-end \
+                        --seed 343 \
+                        --no-unal > /dev/null 2>&1
+
                 samtools view -bS "$SAM" | samtools sort -o "$SORTED_BAM"
                 samtools index "$SORTED_BAM"
                 samtools idxstats "$SORTED_BAM" | awk '{print $3}' > "$COUNTS_FILE"
