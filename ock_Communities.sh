@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=Mock_Communities
-#SBATCH --output=/cluster/tufts/hussainlab/tkwong01/mock_reads/logs/Mock_Communities_%j.log
+#SBATCH --output=/cluster/tufts/hussainlab/tkwong01/mock2/logs/Mock_Communities_%j.log
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --time=24:00:00
-#
+# sbatch run_mock_communities.sh --std_min .1 --std_max .4 --tp_min 20 --tp_max 40 --num_datasets 25 --trends "random cyclic" --species "2 3 4 5 6"
 # Usage:
 #   sbatch run_mock_communities.sh [NUM_DATASETS] ["SPECIES_LIST"] [BASE_SEED]
 #
