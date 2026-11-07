@@ -5,6 +5,8 @@
  # python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 5     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
  # python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 10     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
  # python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 15     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
+
+# conda install -c conda-forge biopython=1.81
 import argparse
 from pathlib import Path
 import numpy as np
