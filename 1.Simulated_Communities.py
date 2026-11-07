@@ -1,7 +1,64 @@
+
+ python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 2     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
+ python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 3     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
+ python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 4     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
+ python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 5     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
+ python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 10     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
+ python 1.Simulated_Communities.py     --fa_dir "/cluster/tufts/hussainlab/tkwong01/15crispatus"     --output_dir "./iss_communities"     --num_species 15     --num_timepoints 30     --std_dev 0.2     --trend_type random     --seed 42
 import argparse
 from pathlib import Path
 import numpy as np
 import pandas as pd
+
+
+def generate_ascii_graph(df, num_species, num_timepoints, std_dev, trend_type, height=15, width=60):
+    """Generates an ASCII line graph for strain abundances over time, including std_dev and trend_type in the title."""
+    strains = df["Strain"].unique()
+    symbols = ["*", "o", ".", "+", "x", "#", "@", "%", "&", "=", "-", "~", "^", "!", ":"]
+    
+    # Initialize grid with spaces
+    grid = [[" " for _ in range(width)] for _ in range(height)]
+    
+    # Map time steps to columns (0 to width-1)
+    # Map abundances (0.0 to 1.0) to rows (height-1 to 0)
+    for idx, strain in enumerate(strains):
+        sym = symbols[idx % len(symbols)]
+        strain_data = df[df["Strain"] == strain].sort_values("Time_Step")
+        
+        for _, row in strain_data.iterrows():
+            t = int(row["Time_Step"])
+            abun = float(row["Abundance"])
+            
+            # Compute grid coordinates
+            col = int(round((t / max(1, num_timepoints - 1)) * (width - 1)))
+            row_idx = int(round((1.0 - min(max(abun, 0.0), 1.0)) * (height - 1)))
+            
+            grid[row_idx][col] = sym
+
+    # Build border and axes with updated title containing std and trend
+    graph_lines = []
+    graph_lines.append(f"\n--- Abundance Trajectories ({num_species} Strains, {num_timepoints} TPs, Trend: {trend_type}, SD: {std_dev}) ---")
+    graph_lines.append(f"Y-axis: Abundance [0.0 to 1.0] | X-axis: Time (T1 to T{num_timepoints})")
+    graph_lines.append("+" + "-" * width + "+")
+    
+    for r in range(height):
+        # Calculate corresponding y-value label for reference edges
+        y_val = 1.0 - (r / (height - 1))
+        row_str = "".join(grid[r])
+        if r == 0 or r == height // 2 or r == height - 1:
+            graph_lines.append(f"|{row_str}| {y_val:.2f}")
+        else:
+            graph_lines.append(f"|{row_str}|")
+            
+    graph_lines.append("+" + "-" * width + "+")
+    
+    # Legend
+    graph_lines.append("Legend (Strains & Symbols):")
+    for idx, strain in enumerate(strains):
+        sym = symbols[idx % len(symbols)]
+        graph_lines.append(f"  [{sym}] {strain}")
+        
+    return "\n".join(graph_lines)
 
 
 def generate_time_series(
@@ -33,7 +90,6 @@ def generate_time_series(
     print(f"Selected strains ({num_species}): {strain_names}")
 
     # 2. Define baseline coefficients and time trends
-    # Base coefficients for each strain
     base_log_abundances = np.random.normal(0, 0.5, size=num_species)
 
     # Time trend slopes per strain
@@ -42,13 +98,10 @@ def generate_time_series(
 
     for i in range(num_species):
         if trend_type == "growth":
-            # Strain 0 grows over time, others decline or stay flat
             slope = 0.15 if i == 0 else -0.05
         elif trend_type == "decline":
-            # Strain 0 declines over time
             slope = -0.15 if i == 0 else 0.05
         elif trend_type == "cyclic":
-            # Oscillatory sinusoidal trend
             trends[i] = 0.3 * np.sin(
                 2 * np.pi * time_steps / num_timepoints + (i * np.pi / 4)
             )
@@ -89,16 +142,25 @@ def generate_time_series(
             f"Generated {tp_name} abundances -> saved to {abundance_file.name}"
         )
 
-    # Save a summary CSV for your own tracking/visualization
+    # Save a summary CSV for your tracking/visualization
     df = pd.DataFrame(records)
     summary_csv = out_path / f"community_{num_species}sp_summary.csv"
     df.to_csv(summary_csv, index=False)
     print(f"Saved longitudinal summary table to {summary_csv}")
 
+    # 4. Generate and save ASCII graph with parameters in title
+    ascii_graph = generate_ascii_graph(df, num_species, num_timepoints, std_dev, trend_type)
+    print(ascii_graph)
+    
+    graph_txt = out_path / f"community_{num_species}sp_graph.txt"
+    with open(graph_txt, "w") as f:
+        f.write(ascii_graph + "\n")
+    print(f"Saved ASCII text graph to {graph_txt}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate longitudinal microbial community abundance files."
+        description="Generate longitudinal microbial community abundance files with ASCII graph."
     )
     parser.add_argument(
         "--fa_dir",
