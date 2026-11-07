@@ -66,62 +66,91 @@ for NSPS in 2 3 4 5 6; do
         echo "Building Bowtie2 index from de novo unitigs..."
         bowtie2-build --threads "$THREADS" "$UNITIG_FASTA" "$UNITIG_DIR/unitig_idx" > /dev/null 2>&1
 
-        # --- Step 4: Map Time-Point FASTQs to Get Depth/Counts Matrix ---
+        # --- Step 4: Map Time-Point FASTQs and Build Counts Matrix (Python-backed) ---
         SUMMARY_MATRIX="$WORK_DIR/timeseries_counts_${NSPS}sp.tsv"
         NONZERO_MATRIX="$WORK_DIR/timeseries_counts_${NSPS}sp_nonzero.tsv"
+        MAPPING_SUMMARY_DIR="$WORK_DIR/mapping_temp_${NSPS}"
+        mkdir -p "$MAPPING_SUMMARY_DIR"
 
-        # 1. Extract clean unitig IDs and lengths
-        grep "^>" "$UNITIG_FASTA" | sed 's/>//' > "$WORK_DIR/unitig_ids_${NSPS}.txt"
-        awk '/^>/ {if (seq) print length(seq); printf "%s\n", substr($1,2); seq=""; next} {seq=seq $1} END {if (seq) print length(seq)}' "$UNITIG_FASTA" > "$WORK_DIR/unitig_lengths_${NSPS}.txt"
-
-        # Initialize counts matrix with just the IDs and lengths
-        cp "$WORK_DIR/unitig_ids_${NSPS}.txt" "$WORK_DIR/matrix_body_${NSPS}.txt"
-        paste "$WORK_DIR/matrix_body_${NSPS}.txt" "$WORK_DIR/unitig_lengths_${NSPS}.txt" > "$WORK_DIR/matrix_merged_${NSPS}.txt"
-        mv "$WORK_DIR/matrix_merged_${NSPS}.txt" "$WORK_DIR/matrix_body_${NSPS}.txt"
-
-        # 2. Loop through each time point and append counts column
+        # 1. Run bowtie2 and samtools indexing for all 30 timepoints, saving count files
         for tp in {1..30}; do
             FASTQ="$COMM_DIR/${COMM_PREFIX}_T${tp}_reads.fastq"
             SAM="$MAPPING_DIR/T${tp}.sam"
             SORTED_BAM="$MAPPING_DIR/T${tp}.sorted.bam"
-            COUNTS_FILE="$MAPPING_DIR/T${tp}_counts.txt"
+            COUNTS_FILE="$MAPPING_SUMMARY_DIR/T${tp}_counts.txt"
 
             if [ ! -f "$FASTQ" ]; then
-                awk '{print "0"}' "$WORK_DIR/unitig_ids_${NSPS}.txt" > "$COUNTS_FILE"
+                # If fastq missing, output zeros matching number of unitigs
+                n_unitigs=$(grep -c "^>" "$UNITIG_FASTA")
+                seq "$n_unitigs" | awk '{print "0"}' > "$COUNTS_FILE"
             else
-                bowtie2 -x "$UNITIG_DIR/unitig_idx" -U "$FASTQ" -p "$THREADS" -S "$SAM" --very-fast > /dev/null 2>&1
+                bowtie2 -x "$UNITIG_DIR"//unitig_idx -U "$FASTQ" -p "$THREADS" -S "$SAM" --very-fast > /dev/null 2>&1
                 samtools view -bS "$SAM" | samtools sort -o "$SORTED_BAM"
                 samtools index "$SORTED_BAM"
                 samtools idxstats "$SORTED_BAM" | awk '{print $3}' > "$COUNTS_FILE"
                 rm -f "$SAM"
             fi
-
-            # Append this timepoint's counts as a new column
-            paste "$WORK_DIR/matrix_body_${NSPS}.txt" "$COUNTS_FILE" > "$WORK_DIR/temp_merged_${NSPS}.txt"
-            mv "$WORK_DIR/temp_merged_${NSPS}.txt" "$WORK_DIR/matrix_body_${NSPS}.txt"
         done
 
-        # 3. Construct clean tab-separated header string
-        HEADER="Unitig_ID\tLength"
-        for tp in {1..30}; do
-            HEADER="${HEADER}\tT${tp}"
-        done
+        # 2. Use Python to assemble, clean, calculate lengths, and filter zero-rows perfectly
+        python3 -c '
+import os
 
-        # 4. Write full matrix with header
-        echo -e "$HEADER" > "$SUMMARY_MATRIX"
-        cat "$WORK_DIR/matrix_body_${NSPS}.txt" >> "$SUMMARY_MATRIX"
+unitig_fasta = "'"$UNITIG_FASTA"'"
+mapping_dir = "'"$MAPPING_SUMMARY_DIR"'"
+out_full = "'"$SUMMARY_MATRIX"'"
+out_nonzero = "'"$NONZERO_MATRIX"'"
 
-        # 5. Write non-zero filtered matrix (Columns 3 through 32 represent T1-T30)
-        echo -e "$HEADER" > "$NONZERO_MATRIX"
-        awk -F'\t' '
-        {
-            sum=0;
-            for(i=3; i<=NF; i++) sum+=$i;
-            if(sum > 0) print $0;
-        }' "$WORK_DIR/matrix_body_${NSPS}.txt" >> "$NONZERO_MATRIX"
+# Parse unitig IDs and lengths from FASTA
+unitigs = []
+current_id = None
+current_seq = []
 
-        # Cleanup temporary files
-        rm -f "$WORK_DIR/matrix_body_${NSPS}.txt" "$WORK_DIR/unitig_ids_${NSPS}.txt" "$WORK_DIR/unitig_lengths_${NSPS}.txt"
+with open(unitig_fasta) as f:
+    for line in f:
+        line = line.strip()
+        if line.startswith(">"):
+            if current_id:
+                unitigs.append((current_id, len("".join(current_seq))))
+            current_id = line[1:]
+            current_seq = []
+        else:
+            current_seq.append(line)
+if current_id:
+    unitigs.append((current_id, len("".join(current_seq))))
+
+# Load counts for T1 to T30
+timepoints = [f"T{i}" for i in range(1, 31)]
+counts_data = {}
+
+for tp in timepoints:
+    cfile = os.path.join(mapping_dir, f"{tp}_counts.txt")
+    vals = []
+    if os.path.exists(cfile):
+        with open(cfile) as cf:
+            for line in cf:
+                vals.append(int(line.strip()))
+    else:
+        vals = [0] * len(unitigs)
+    counts_data[tp] = vals
+
+# Write matrices
+header = ["Unitig_ID", "Length"] + timepoints
+
+for target_path, filter_nonzero in [(out_full, False), (out_nonzero, True)]:
+    with open(target_path, "w") as out:
+        out.write("\t".join(header) + "\n")
+        for idx, (uid, ulen) in enumerate(unitigs):
+            row_counts = [counts_data[tp][idx] for tp in timepoints]
+            if filter_nonzero and sum(row_counts) == 0:
+                continue
+            row_str = [uid, str(ulen)] + [str(c) for c in row_counts]
+            out.write("\t".join(row_str) + "\n")
+print("Python matrix assembly and filtering complete.")
+'
+
+        # Cleanup temporary mapping counts directory
+        rm -rf "$MAPPING_SUMMARY_DIR"
         
         echo "Completed timeseries count matrices for ${NSPS}sp:"
         echo "  - Full: $SUMMARY_MATRIX"
