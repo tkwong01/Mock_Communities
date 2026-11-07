@@ -47,7 +47,7 @@ THREADS="${SLURM_CPUS_PER_TASK:-8}"
 # ---------------- Paths ----------------
 FA_DIR="/cluster/tufts/hussainlab/tkwong01/15crispatus"
 CUSTOM_FASTA="/cluster/tufts/hussainlab/DATABASES/VIRGO2/FastaFiles/VIRGO2.fa"
-WORK_DIR="/cluster/tufts/hussainlab/tkwong01/mock_reads"
+WORK_DIR="/cluster/tufts/hussainlab/tkwong01/mock2"
 OUT_ROOT="$WORK_DIR/mock_datasets"
 INDEX_DIR="$WORK_DIR/shared_bowtie_index"
 INDEX_PREFIX="$INDEX_DIR/VIRGO2_idx"
